@@ -165,7 +165,7 @@ async def multiplayer(ws: WebSocket):
                     continue
                 level_data = level.get("level_data")
                 if not isinstance(level_data, dict) or not (
-                    isinstance(level_data.get("objects"), list) or
+                    isinstance(level_data.get("objects"), (list, dict)) or
                     isinstance(level_data.get("stages"), list)
                 ):
                     await send(ws, {"type": "error", "message": "Selected level has no valid level data"})
