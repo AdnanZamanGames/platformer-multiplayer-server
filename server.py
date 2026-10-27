@@ -111,6 +111,7 @@ async def multiplayer(ws: WebSocket):
         room.setdefault("players", {})
         room.setdefault("owner_id", None)
         room.setdefault("selected_level", None)
+        room.setdefault("race_result", None)
         if len(room["players"]) >= MAX_PLAYERS:
             await send(ws, {"type": "error", "message": "Room is full"})
             await ws.close(code=1008)
@@ -127,6 +128,7 @@ async def multiplayer(ws: WebSocket):
             "type": "room_joined", "room_code": code, "player_id": player_id,
             "is_owner": player_id == room.get("owner_id"),
             "selected_level": room.get("selected_level"),
+            "race_result": room.get("race_result"),
             "players": existing_players + [{"id": player_id, "name": name, "state": None}]
         })
         await broadcast(room, {"type": "player_joined", "player_id": player_id,
@@ -177,11 +179,29 @@ async def multiplayer(ws: WebSocket):
                     "level_data": level_data,
                 }
                 room["selected_level"] = selected
+                room["race_result"] = None
                 await broadcast(room, {"type": "room_level_selected", "player_id": player_id,
                                        "level": selected})
+                await broadcast(room, {"type": "race_reset", "level_id": selected.get("id")})
             elif kind == "game_event":
-                await broadcast(room, {"type": "game_event", "player_id": player_id,
-                                       "data": message.get("data", {})}, exclude=player_id)
+                # Race completion is the only gameplay event shared by this race-only build.
+                # Switches, keys, doors, collectibles and trigger effects remain personal.
+                event_data = message.get("data", {})
+                if not isinstance(event_data, dict) or event_data.get("event") != "race_finish":
+                    continue
+                if room.get("race_result") is not None:
+                    await send(ws, {"type": "race_result", **room["race_result"]})
+                    continue
+                winner_name = str(event_data.get("player_name") or room["names"].get(player_id) or "Player")[:24]
+                result = {
+                    "winner_id": player_id,
+                    "winner_name": winner_name,
+                    "stage_index": int(event_data.get("stage_index", 0) or 0),
+                    "finished_at": time.time(),
+                }
+                room["race_result"] = result
+                # Include the sender so every client follows the same authoritative result.
+                await broadcast(room, {"type": "race_result", **result})
             elif kind == "list_players":
                 await send(ws, {"type": "players", "players": player_list(room)})
             elif kind == "leave":
